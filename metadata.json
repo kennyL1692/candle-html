@@ -1,0 +1,5 @@
+{
+  "name": "Realistic Melting Candle",
+  "description": "A physics-simulated candle flame and melting animation that resolves in 10 seconds.",
+  "requestFramePermissions": []
+}
