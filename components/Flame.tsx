@@ -8,122 +8,135 @@ interface Particle {
   life: number;
   maxLife: number;
   size: number;
-  color: { r: number; g: number; b: number };
+  kind: 'core' | 'spark' | 'smoke';
 }
 
-export const Flame: React.FC = () => {
+interface FlameProps {
+  wind: number;
+  intensity: number;
+}
+
+export const Flame: React.FC<FlameProps> = ({ wind, intensity }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    
+
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Set high resolution
     const dpr = window.devicePixelRatio || 1;
     const rect = canvas.getBoundingClientRect();
     canvas.width = rect.width * dpr;
     canvas.height = rect.height * dpr;
-    ctx.scale(dpr, dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-    // Particle System State
     const particles: Particle[] = [];
     let animationFrameId: number;
     let frameCount = 0;
 
     const spawnParticle = () => {
-      // Spawn point (bottom center of canvas)
       const centerX = rect.width / 2;
-      const centerY = rect.height - 10;
+      const centerY = rect.height - 16;
+      const draft = (Math.random() - 0.5 + wind) * 0.42;
 
-      // Create main flame body particles
-      const p: Particle = {
-        x: centerX + (Math.random() - 0.5) * 4,
+      particles.push({
+        x: centerX + (Math.random() - 0.5) * 5,
         y: centerY,
-        vx: (Math.random() - 0.5) * 0.3,
-        vy: -0.5 - Math.random() * 1.5, // Upward velocity
-        life: 1.0,
-        maxLife: 1.0,
-        size: 8 + Math.random() * 6,
-        color: { r: 255, g: 255, b: 255 } // Starts white/hot
-      };
-      particles.push(p);
+        vx: draft,
+        vy: -0.85 - Math.random() * 1.65 * intensity,
+        life: 1,
+        maxLife: 1,
+        size: 8 + Math.random() * 8 * intensity,
+        kind: 'core',
+      });
 
-      // Occasional spark/smoke
-      if (Math.random() > 0.95) {
+      if (Math.random() > 0.9 - wind * 0.08) {
         particles.push({
-           x: centerX + (Math.random() - 0.5) * 6,
-           y: centerY - 10,
-           vx: (Math.random() - 0.5) * 0.5,
-           vy: -1 - Math.random(),
-           life: 1.0,
-           maxLife: 0.8 + Math.random() * 0.4,
-           size: 2 + Math.random() * 2,
-           color: { r: 50, g: 50, b: 50 } // Grey smoke
+          x: centerX + (Math.random() - 0.5) * 8,
+          y: centerY - 9,
+          vx: (Math.random() - 0.5 + wind) * 1.45,
+          vy: -2.2 - Math.random() * 2.8,
+          life: 1,
+          maxLife: 0.72 + Math.random() * 0.3,
+          size: 1.2 + Math.random() * 2.5,
+          kind: 'spark',
+        });
+      }
+
+      if (Math.random() > 0.94) {
+        particles.push({
+          x: centerX + (Math.random() - 0.5) * 10,
+          y: centerY - 12,
+          vx: (Math.random() - 0.5 + wind) * 0.6,
+          vy: -0.7 - Math.random() * 0.8,
+          life: 1,
+          maxLife: 1.25,
+          size: 8 + Math.random() * 6,
+          kind: 'smoke',
         });
       }
     };
 
+    const colorForParticle = (particle: Particle) => {
+      if (particle.kind === 'smoke') {
+        return { r: 120, g: 122, b: 128, a: particle.life * 0.12 };
+      }
+
+      if (particle.kind === 'spark') {
+        return { r: 255, g: 205, b: 76, a: particle.life };
+      }
+
+      if (particle.life > 0.82) {
+        return { r: 112, g: 180, b: 255, a: particle.life * 0.5 };
+      }
+
+      if (particle.life > 0.54) {
+        return { r: 255, g: 238, b: 107, a: particle.life * 0.86 };
+      }
+
+      if (particle.life > 0.24) {
+        return { r: 255, g: 122, b: 15, a: particle.life * 0.68 };
+      }
+
+      return { r: 154, g: 23, b: 5, a: particle.life * 0.35 };
+    };
+
     const updateAndDraw = () => {
       ctx.clearRect(0, 0, rect.width, rect.height);
-      ctx.globalCompositeOperation = 'lighter'; // Additive blending for fire glow
+      ctx.globalCompositeOperation = 'lighter';
 
-      // Wind/Flicker simulation
       frameCount++;
-      const windForce = Math.sin(frameCount * 0.1) * 0.05 + (Math.random() - 0.5) * 0.02;
+      const windForce = Math.sin(frameCount * 0.07) * 0.05 + wind * 0.09 + (Math.random() - 0.5) * 0.035;
+      const spawnCount = Math.max(2, Math.round(3 * intensity));
+      for (let i = 0; i < spawnCount; i++) spawnParticle();
 
-      // Spawn new particles
-      // Spawn rate
-      for (let i = 0; i < 3; i++) spawnParticle();
-
-      // Update Loop
       for (let i = particles.length - 1; i >= 0; i--) {
-        const p = particles[i];
-        
-        // Physics
-        p.x += p.vx + windForce * (1 - p.life); // Wind affects top more
-        p.y += p.vy;
-        p.life -= 0.015 + Math.random() * 0.01; // Decay
-        p.size *= 0.96; // Shrink
+        const particle = particles[i];
+        const topWeight = 1 - particle.life;
 
-        // Color Logic based on life (Heat map)
-        // Life 1.0 -> 0.8: Blue/White (Base)
-        // Life 0.8 -> 0.5: Yellow/Orange (Body)
-        // Life 0.5 -> 0.0: Red/Grey (Tip)
-        
-        let r, g, b, a;
-        
-        if (p.color.r === 50) { // Smoke particle handling
-             r = 80; g = 80; b = 80; a = p.life * 0.3;
-        } else {
-            // Fire particle gradient
-            if (p.life > 0.8) {
-                r = 100; g = 150; b = 255; a = p.life * 0.5; // Blue core
-            } else if (p.life > 0.5) {
-                r = 255; g = 220; b = 50; a = p.life * 0.8; // Yellow body
-            } else if (p.life > 0.2) {
-                r = 255; g = 100; b = 0; a = p.life * 0.6; // Orange/Red tip
-            } else {
-                r = 100; g = 0; b = 0; a = p.life * 0.4; // Fading red
-            }
-        }
+        particle.x += particle.vx + windForce * topWeight;
+        particle.y += particle.vy;
+        particle.life -= particle.kind === 'spark' ? 0.022 : 0.012 + Math.random() * 0.012;
+        particle.size *= particle.kind === 'smoke' ? 1.008 : 0.965;
 
-        // Render
-        if (p.life <= 0 || p.size < 0.5) {
+        if (particle.life <= 0 || particle.size < 0.45) {
           particles.splice(i, 1);
-        } else {
-          ctx.beginPath();
-          // Create a soft radial gradient for each particle for "puff" look
-          const gradient = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.size);
-          gradient.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${a})`);
-          gradient.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
-          
-          ctx.fillStyle = gradient;
-          ctx.arc(p.x, p.y, p.size * 1.5, 0, Math.PI * 2);
-          ctx.fill();
+          continue;
         }
+
+        const { r, g, b, a } = colorForParticle(particle);
+        const radius = particle.kind === 'spark' ? particle.size * 2.1 : particle.size * 1.55;
+        const gradient = ctx.createRadialGradient(particle.x, particle.y, 0, particle.x, particle.y, radius);
+        gradient.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${a})`);
+        gradient.addColorStop(0.45, `rgba(${r}, ${g}, ${b}, ${a * 0.5})`);
+        gradient.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
+
+        ctx.fillStyle = gradient;
+        ctx.beginPath();
+        ctx.arc(particle.x, particle.y, radius, 0, Math.PI * 2);
+        ctx.fill();
       }
 
       animationFrameId = requestAnimationFrame(updateAndDraw);
@@ -134,18 +147,17 @@ export const Flame: React.FC = () => {
     return () => {
       cancelAnimationFrame(animationFrameId);
     };
-  }, []);
+  }, [intensity, wind]);
 
-  // Filter blur helps blend the particles into a fluid flame
   return (
-    <div className="relative w-32 h-40 -translate-x-1/2 left-1/2 -top-32 pointer-events-none">
-       <canvas 
-        ref={canvasRef} 
-        className="w-full h-full filter blur-[2px]" 
-        style={{ transform: 'translateY(20px)'}}
-       />
-       {/* Halo glow */}
-       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-16 h-16 bg-orange-500 rounded-full opacity-20 blur-xl mix-blend-screen animate-pulse" />
+    <div className="pointer-events-none relative left-1/2 -top-32 h-44 w-36 -translate-x-1/2">
+      <canvas
+        ref={canvasRef}
+        className="h-full w-full blur-[1.6px] filter"
+        style={{ transform: 'translateY(18px)' }}
+      />
+      <div className="absolute left-1/2 top-[55%] h-20 w-20 -translate-x-1/2 -translate-y-1/2 rounded-full bg-orange-500 opacity-20 blur-2xl mix-blend-screen animate-pulse" />
+      <div className="absolute left-1/2 top-[64%] h-10 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-sky-200/40 blur-md mix-blend-screen" />
     </div>
   );
 };
