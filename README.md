@@ -1,20 +1,28 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# Realistic Melting Candle Demo
 
-# Run and deploy your AI Studio app
+A cinematic React + Vite demo that uses JavaScript-driven animation loops for candle melting, flame particles, smoke, sparks, cursor-reactive lighting, and selectable draft presets.
 
-This contains everything you need to run your app locally.
+## Demo highlights
 
-View your app in AI Studio: https://ai.studio/apps/drive/1PO2qOiHy-73sXh67Wt4VweZqTdVobErf
+- Real-time melt countdown and progress meter.
+- Three presentation presets: Cinematic, Storm draft, and Gallery calm.
+- Canvas flame simulation with wind, sparks, smoke, and additive glow.
+- Wax pool, rounded melting lip, and animated wax drips.
+- Pointer-reactive ambient room lighting for a more polished live demo.
 
-## Run Locally
+## Run locally
 
-**Prerequisites:**  Node.js
-
+**Prerequisites:** Node.js
 
 1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+   ```bash
+   npm install
+   ```
+2. Start the Vite dev server:
+   ```bash
+   npm run dev
+   ```
+3. Build for production:
+   ```bash
+   npm run build
+   ```

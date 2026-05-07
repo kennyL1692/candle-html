@@ -1,14 +1,23 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Flame } from './Flame';
 
 interface CandleProps {
   isMelting: boolean;
   durationMs: number;
   isFinished: boolean;
+  wind: number;
+  intensity: number;
 }
 
-export const Candle: React.FC<CandleProps> = ({ isMelting, durationMs, isFinished }) => {
+const dripProfiles = [
+  { left: 9, width: 9, delay: 0.04, speed: 1.05, max: 118 },
+  { left: 33, width: 6, delay: 0.2, speed: 0.86, max: 92 },
+  { left: 47, width: 7, delay: 0.34, speed: 1.22, max: 132 },
+];
+
+export const Candle: React.FC<CandleProps> = ({ isMelting, durationMs, isFinished, wind, intensity }) => {
   const [progress, setProgress] = useState(0);
+  const [flicker, setFlicker] = useState(0);
   const startTimeRef = useRef<number | null>(null);
   const reqRef = useRef<number>();
 
@@ -19,8 +28,9 @@ export const Candle: React.FC<CandleProps> = ({ isMelting, durationMs, isFinishe
         if (!startTimeRef.current) return;
         const elapsed = time - startTimeRef.current;
         const nextProgress = Math.min(elapsed / durationMs, 1);
-        
+
         setProgress(nextProgress);
+        setFlicker(Math.sin(time * 0.018) * 0.5 + Math.sin(time * 0.047) * 0.3 + (Math.random() - 0.5) * 0.35);
 
         if (nextProgress < 1) {
           reqRef.current = requestAnimationFrame(animate);
@@ -29,8 +39,11 @@ export const Candle: React.FC<CandleProps> = ({ isMelting, durationMs, isFinishe
       reqRef.current = requestAnimationFrame(animate);
     } else if (isFinished) {
       setProgress(1);
+      setFlicker(0);
     } else {
       setProgress(0);
+      setFlicker(0);
+      startTimeRef.current = null;
     }
 
     return () => {
@@ -38,84 +51,101 @@ export const Candle: React.FC<CandleProps> = ({ isMelting, durationMs, isFinishe
     };
   }, [isMelting, durationMs, isFinished]);
 
-  // Dimensions
-  const INITIAL_HEIGHT = 200;
-  const WIDTH = 60;
-  
-  // Calculated properties
-  const currentHeight = Math.max(10, INITIAL_HEIGHT * (1 - progress));
-  const poolScale = 1 + (progress * 1.5); // Wax pool grows
-  const flickerOpacity = isFinished ? 0 : 1;
+  const initialHeight = 220;
+  const width = 68;
+  const currentHeight = Math.max(12, initialHeight * (1 - progress));
+  const poolScale = 1 + progress * 1.9;
+  const meltedLip = 8 + progress * 22;
+  const glowStrength = isFinished ? 0 : (0.58 + flicker * 0.08) * intensity;
+
+  const droplets = useMemo(
+    () =>
+      dripProfiles.map(drip => ({
+        ...drip,
+        height: Math.max(0, Math.min((progress - drip.delay) * drip.max * drip.speed, drip.max)),
+        opacity: progress > drip.delay ? Math.min((progress - drip.delay) * 4, 0.75) : 0,
+      })),
+    [progress],
+  );
 
   return (
     <div className="relative flex flex-col items-center">
-      
-      {/* Dynamic Glow behind flame */}
-      <div 
-        className="absolute top-0 transform -translate-y-full w-64 h-64 rounded-full pointer-events-none transition-opacity duration-1000"
+      <div
+        className="pointer-events-none absolute top-0 h-80 w-80 -translate-y-full rounded-full blur-2xl transition-opacity duration-500"
         style={{
-          background: 'radial-gradient(closest-side, rgba(255, 180, 50, 0.15), transparent)',
-          opacity: isFinished ? 0 : 0.6 + (Math.random() * 0.1), // Subtle global flicker
-          transform: `translateY(-${currentHeight + 20}px) scale(${1 + Math.random() * 0.1})`
+          background: 'radial-gradient(closest-side, rgba(255, 201, 91, 0.34), rgba(255, 122, 24, 0.12) 42%, transparent 76%)',
+          opacity: glowStrength,
+          transform: `translateY(-${currentHeight - 4}px) translateX(${flicker * 7 + wind * 10}px) scale(${1 + Math.abs(flicker) * 0.05})`,
         }}
       />
 
-      {/* Flame Container */}
-      <div 
-        className="absolute z-20 transition-all duration-75 ease-out"
-        style={{ 
-          bottom: `${currentHeight}px`,
+      <div
+        className="absolute z-20 transition-all duration-100 ease-out"
+        style={{
+          bottom: `${currentHeight - 2}px`,
           opacity: isFinished ? 0 : 1,
-          transform: `scale(${isFinished ? 0 : 1})`,
-          transition: 'opacity 1s, transform 1s' 
+          transform: `translateX(${wind * 9 + flicker * 3}px) rotate(${wind * 7 + flicker * 2}deg) scale(${isFinished ? 0 : 1})`,
+          transition: 'opacity 1s, transform 160ms ease-out',
         }}
       >
-        <Flame />
+        <Flame wind={wind} intensity={intensity} />
       </div>
 
-      {/* Wick */}
-      <div 
-        className="absolute z-10 w-1 bg-slate-800 rounded-t-sm"
-        style={{ 
-            height: '12px',
-            bottom: `${currentHeight - 6}px`, // Slightly embedded
-            opacity: isFinished ? 0.5 : 1
-        }} 
-      />
-
-      {/* Wax Pool (accumulates at bottom) */}
-      <div 
-        className="absolute bottom-0 z-0 bg-[#f5f5f0] rounded-full blur-[1px] shadow-lg opacity-90 transition-transform duration-75"
+      <div
+        className="absolute z-10 w-1 rounded-t-sm bg-gradient-to-b from-slate-700 to-slate-950"
         style={{
-            width: `${WIDTH + 20}px`,
-            height: '24px',
-            transform: `scaleX(${poolScale}) scaleY(${1 + (progress * 0.5)})`,
-            boxShadow: '0 0 10px rgba(255, 255, 255, 0.2)'
+          height: '16px',
+          bottom: `${Math.max(currentHeight - 9, 4)}px`,
+          opacity: isFinished ? 0.45 : 1,
+          transform: `rotate(${wind * 7}deg)`,
         }}
       />
 
-      {/* Molten Wax Dripping effect (simulated with gradient overlay) */}
-      <div 
-        className="relative bg-gradient-to-b from-[#fffdf5] to-[#f0efe9] rounded-sm shadow-inner overflow-hidden transition-all duration-75"
+      <div
+        className="absolute bottom-0 z-0 rounded-full bg-[#f7f1e4] opacity-95 blur-[1px] transition-transform duration-100"
         style={{
-            width: `${WIDTH}px`,
-            height: `${currentHeight}px`,
-            borderRadius: '4px',
-            boxShadow: 'inset 0 -10px 20px rgba(0,0,0,0.1), 0 0 15px rgba(255, 200, 100, 0.1)'
+          width: `${width + 24}px`,
+          height: '28px',
+          transform: `scaleX(${poolScale}) scaleY(${1 + progress * 0.72})`,
+          boxShadow: `0 0 ${14 + progress * 18}px rgba(255, 210, 150, ${0.18 + progress * 0.24})`,
+        }}
+      />
+
+      <div
+        className="relative overflow-visible bg-gradient-to-r from-[#e5dfd1] via-[#fffdf5] to-[#d9d1c3] shadow-inner transition-all duration-100"
+        style={{
+          width: `${width}px`,
+          height: `${currentHeight}px`,
+          borderRadius: `${meltedLip}px ${meltedLip}px 8px 8px`,
+          boxShadow: 'inset -14px 0 18px rgba(90,70,42,0.16), inset 11px 0 18px rgba(255,255,255,0.78), 0 0 26px rgba(255, 178, 90, 0.14)',
         }}
       >
-        {/* Subsurface scattering glow near top */}
-        <div 
-            className="absolute top-0 left-0 right-0 h-16 bg-gradient-to-b from-[#ffeedd] to-transparent opacity-80"
+        <div className="absolute inset-x-0 top-0 h-12 rounded-t-full bg-gradient-to-b from-[#fff6dd] to-transparent opacity-90" />
+        <div
+          className="absolute -top-1 left-1/2 h-5 w-[76px] -translate-x-1/2 rounded-full border border-amber-100/50 bg-gradient-to-r from-[#e4d6bd] via-[#fff6df] to-[#d2bea0]"
+          style={{ transform: `translateX(-50%) scaleX(${1 + progress * 0.2})` }}
         />
-        
-        {/* Drip lines that appear as it melts */}
-        <div className="absolute top-0 left-2 w-2 bg-white/40 rounded-full" style={{ height: `${progress * 100}%`, opacity: progress > 0.1 ? 0.6 : 0 }} />
-        <div className="absolute top-0 right-3 w-1.5 bg-white/30 rounded-full" style={{ height: `${progress * 80}%`, opacity: progress > 0.2 ? 0.5 : 0 }} />
+        <div className="absolute inset-y-0 left-3 w-2 rounded-full bg-white/35 blur-[1px]" />
+        <div className="absolute inset-y-0 right-2 w-3 rounded-full bg-amber-900/10 blur-[2px]" />
+
+        {droplets.map(drip => (
+          <div
+            key={drip.left}
+            className="absolute top-1 rounded-full bg-gradient-to-b from-white/70 to-amber-100/45 shadow-sm"
+            style={{
+              left: `${drip.left}px`,
+              width: `${drip.width}px`,
+              height: `${drip.height}px`,
+              opacity: drip.opacity,
+            }}
+          >
+            <span className="absolute bottom-[-5px] left-1/2 h-3 w-3 -translate-x-1/2 rounded-full bg-amber-50/80" />
+          </div>
+        ))}
       </div>
 
-      {/* Base reflection */}
-      <div className="absolute -bottom-4 w-32 h-4 bg-black/40 blur-xl rounded-full" />
+      <div className="absolute -bottom-5 h-5 w-44 rounded-full bg-black/60 blur-xl" />
+      <div className="absolute -bottom-1 h-1 w-32 rounded-full bg-amber-100/20 blur-sm" />
     </div>
   );
 };
