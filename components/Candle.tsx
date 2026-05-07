@@ -10,9 +10,11 @@ interface CandleProps {
 }
 
 const dripProfiles = [
-  { left: 9, width: 9, delay: 0.04, speed: 1.05, max: 118 },
-  { left: 33, width: 6, delay: 0.2, speed: 0.86, max: 92 },
-  { left: 47, width: 7, delay: 0.34, speed: 1.22, max: 132 },
+  { left: 4,  width: 6, delay: 0.04, speed: 1.08, max: 128, blob: 11 },
+  { left: 15, width: 5, delay: 0.15, speed: 0.72, max: 80,  blob: 9  },
+  { left: 28, width: 8, delay: 0.23, speed: 1.28, max: 150, blob: 14 },
+  { left: 43, width: 5, delay: 0.38, speed: 0.95, max: 106, blob: 9  },
+  { left: 54, width: 6, delay: 0.11, speed: 0.84, max: 90,  blob: 10 },
 ];
 
 export const Candle: React.FC<CandleProps> = ({ isMelting, durationMs, isFinished, wind, intensity }) => {
@@ -63,7 +65,7 @@ export const Candle: React.FC<CandleProps> = ({ isMelting, durationMs, isFinishe
       dripProfiles.map(drip => ({
         ...drip,
         height: Math.max(0, Math.min((progress - drip.delay) * drip.max * drip.speed, drip.max)),
-        opacity: progress > drip.delay ? Math.min((progress - drip.delay) * 4, 0.75) : 0,
+        opacity: progress > drip.delay ? Math.min((progress - drip.delay) * 5, 0.88) : 0,
       })),
     [progress],
   );
@@ -121,27 +123,55 @@ export const Candle: React.FC<CandleProps> = ({ isMelting, durationMs, isFinishe
         }}
       >
         <div className="absolute inset-x-0 top-0 h-12 rounded-t-full bg-gradient-to-b from-[#fff6dd] to-transparent opacity-90" />
+        {/* Liquid wax pool: dark molten center around wick, raised rim at edges */}
         <div
-          className="absolute -top-1 left-1/2 h-5 w-[76px] -translate-x-1/2 rounded-full border border-amber-100/50 bg-gradient-to-r from-[#e4d6bd] via-[#fff6df] to-[#d2bea0]"
-          style={{ transform: `translateX(-50%) scaleX(${1 + progress * 0.2})` }}
+          className="absolute -top-1 left-1/2 -translate-x-1/2 rounded-full border border-amber-100/30"
+          style={{
+            width: `${78 + progress * 14}px`,
+            height: `${18 + progress * 8}px`,
+            background: `radial-gradient(ellipse at 50% 40%, rgba(158,130,88,${0.28 + progress * 0.48}) 0%, rgba(224,208,174,0.94) 48%, rgba(195,178,146,0.97) 100%)`,
+            transform: `translateX(-50%) scaleX(${1 + progress * 0.18})`,
+            boxShadow: `inset 0 2px 5px rgba(90,58,18,${0.08 + progress * 0.24})`,
+          }}
         />
         <div className="absolute inset-y-0 left-3 w-2 rounded-full bg-white/35 blur-[1px]" />
         <div className="absolute inset-y-0 right-2 w-3 rounded-full bg-amber-900/10 blur-[2px]" />
 
-        {droplets.map(drip => (
-          <div
-            key={drip.left}
-            className="absolute top-1 rounded-full bg-gradient-to-b from-white/70 to-amber-100/45 shadow-sm"
-            style={{
-              left: `${drip.left}px`,
-              width: `${drip.width}px`,
-              height: `${drip.height}px`,
-              opacity: drip.opacity,
-            }}
-          >
-            <span className="absolute bottom-[-5px] left-1/2 h-3 w-3 -translate-x-1/2 rounded-full bg-amber-50/80" />
-          </div>
-        ))}
+        {droplets.map(drip => {
+          const stemH = Math.max(0, drip.height - drip.blob * 0.6);
+          return (
+            <React.Fragment key={drip.left}>
+              {/* Narrow stem */}
+              <div
+                className="absolute"
+                style={{
+                  top: 2,
+                  left: `${drip.left}px`,
+                  width: `${drip.width}px`,
+                  height: `${stemH}px`,
+                  background: 'linear-gradient(to bottom, rgba(255,248,228,0.9), rgba(232,212,172,0.72))',
+                  borderRadius: '3px 3px 2px 2px',
+                  opacity: drip.opacity,
+                }}
+              />
+              {/* Rounded blob at drip tip */}
+              {drip.height > drip.blob * 0.4 && (
+                <div
+                  className="absolute rounded-full"
+                  style={{
+                    top: 2 + stemH - drip.blob * 0.25,
+                    left: `${drip.left + drip.width / 2 - drip.blob / 2}px`,
+                    width: `${drip.blob}px`,
+                    height: `${drip.blob}px`,
+                    background: 'rgba(248, 234, 204, 0.93)',
+                    boxShadow: 'inset 1px 1px 2px rgba(255,255,255,0.5), inset -1px -1px 1px rgba(175,148,105,0.3)',
+                    opacity: drip.opacity,
+                  }}
+                />
+              )}
+            </React.Fragment>
+          );
+        })}
       </div>
 
       <div className="absolute -bottom-5 h-5 w-44 rounded-full bg-black/60 blur-xl" />
