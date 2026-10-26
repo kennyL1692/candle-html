@@ -1,5 +1,5 @@
 {
-  "name": "Realistic Melting Candle",
-  "description": "A physics-simulated candle flame and melting animation that resolves in 10 seconds.",
-  "requestFramePermissions": []
+  "name": "Pillar Candle",
+  "description": "A real-time 3D candle with a living flame, molten wax, drips, smoke and warm light. Blow it out, relight it, and watch it burn down.",
+  "requestFramePermissions": ["microphone"]
 }

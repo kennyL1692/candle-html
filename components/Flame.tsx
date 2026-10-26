@@ -1,147 +1,192 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useMemo, useRef } from 'react';
+import { useFrame } from '@react-three/fiber';
+import * as THREE from 'three';
+import { CANDLE, sim } from '../sim/store';
 
-interface FlameProps {
-  wind: number;
-  intensity: number;
-}
+// Flame quad size in cm. The flame base sits BASE cm above the quad's bottom edge.
+const PLANE_W = 5;
+const PLANE_H = 7.5;
+const BASE = 0.35;
 
-// Sum of sine waves — cheap organic noise
-const osc = (t: number, specs: [number, number, number][]) =>
-  specs.reduce((sum, [freq, amp, phase]) => sum + Math.sin(t * freq + phase) * amp, 0);
+const vertex = /* glsl */ `
+  varying vec2 vUv;
+  void main() {
+    vUv = uv;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
 
-export const Flame: React.FC<FlameProps> = ({ wind, intensity }) => {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+const flameFragment = /* glsl */ `
+  uniform float uTime;
+  uniform float uLen;
+  uniform float uLean;
+  uniform float uTurb;
+  uniform float uLit;
+  uniform float uWidth;
+  uniform vec2 uPlane;
+  uniform float uBase;
+  varying vec2 vUv;
 
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+  float hash(vec2 p) {
+    p = fract(p * vec2(123.34, 456.21));
+    p += dot(p, p + 45.32);
+    return fract(p.x * p.y);
+  }
+  float noise(vec2 p) {
+    vec2 i = floor(p), f = fract(p);
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x),
+               mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);
+  }
+  float fbm(vec2 p) {
+    float v = 0.0, a = 0.5;
+    for (int i = 0; i < 4; i++) { v += a * noise(p); p *= 2.03; a *= 0.5; }
+    return v;
+  }
 
-    const W = 144, H = 176;
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = W * dpr;
-    canvas.height = H * dpr;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  void main() {
+    float xcm = (vUv.x - 0.5) * uPlane.x;
+    float ycm = vUv.y * uPlane.y - uBase;
+    float len = max(uLen, 0.001);
+    float h = ycm / len;
+    float hc = clamp(h, 0.0, 1.2);
 
-    interface Spark { x: number; y: number; vx: number; vy: number; life: number; size: number; }
-    const sparks: Spark[] = [];
-    let t = 0;
-    let raf: number;
+    // Bend: the tip moves most when the flame leans.
+    float x = xcm - uLean * hc * hc * len * 0.55;
 
-    // Teardrop bezier: base at (cx, by), tip at (cx+sx, by-h), half-width w
-    const flamePath = (cx: number, by: number, h: number, w: number, sx: number) => {
-      const tx = cx + sx, ty = by - h;
-      ctx.beginPath();
-      ctx.moveTo(cx, by);
-      ctx.bezierCurveTo(cx + w, by - h * 0.22, tx + w * 0.65, by - h * 0.54, tx, ty);
-      ctx.bezierCurveTo(tx - w * 0.65, by - h * 0.54, cx - w, by - h * 0.22, cx, by);
-      ctx.closePath();
-    };
+    // Hot gas rises, so turbulence scrolls upward and grows towards the tip.
+    float n = fbm(vec2(xcm * 1.3, ycm * 0.9 - uTime * 3.6));
+    float n2 = noise(vec2(uTime * 2.3, ycm * 0.5));
+    x += (n - 0.5) * hc * hc * (0.16 + uTurb * 1.0);
+    x += (n2 - 0.5) * hc * 0.05;
 
-    const render = () => {
-      t += 1 / 60;
-      ctx.clearRect(0, 0, W, H);
+    // Teardrop profile: round bottom, widest at about a quarter, pointed tip.
+    float t = clamp((h + 0.07) / 1.07, 0.0, 1.0);
+    float prof = pow(t, 0.5) * pow(1.0 - t, 1.1) / 0.37;
+    float w = uWidth * prof * (1.0 - 0.25 * uTurb);
+    float e = abs(x) / max(w, 1e-4);
 
-      const cx = W / 2, by = H - 8;
+    float inside = (1.0 - smoothstep(0.8, 1.0, e)) * step(-0.07, h);
+    float tipFade = 1.0 - smoothstep(0.7 + (n - 0.5) * 0.25, 1.0, h);
 
-      // Multi-frequency sway simulates turbulent air
-      const sw = osc(t, [[1.1, 5.5, 0], [2.9, 2.8, 1.2], [5.7, 1.4, 2.5]]) + wind * 22;
-      // Breathing: the flame swells and contracts
-      const br = 1 + osc(t, [[0.85, 0.07, 0], [2.3, 0.035, 1.5]]);
-      const fh = (84 + osc(t, [[1.4, 6, 0.6], [3.3, 2.8, 2.2]])) * intensity * br;
+    // Zones of a real candle flame.
+    float lum = smoothstep(0.08, 0.3, h - e * 0.06);                // glowing soot zone
+    float core = (1.0 - smoothstep(0.0, 0.55, e)) * smoothstep(0.1, 0.32, h) * (1.0 - smoothstep(0.42, 0.85, h));
+    float darkCone = (1.0 - smoothstep(0.0, 0.45, e)) * (1.0 - smoothstep(0.03, 0.32, h));
+    float blue = (1.0 - smoothstep(0.0, 0.28, h)) * (0.35 + 0.65 * smoothstep(0.1, 0.85, e))
+               + (1.0 - smoothstep(-0.07, 0.06, h)) * 0.5;
 
-      // Layer 1 — outer orange halo (heavy blur, wide)
-      ctx.save();
-      ctx.filter = 'blur(10px)';
-      ctx.globalCompositeOperation = 'lighter';
-      ctx.globalAlpha = 0.48 * intensity;
-      flamePath(cx, by, fh * 0.92, 28, sw * 0.6);
-      const g1 = ctx.createLinearGradient(cx, by, cx + sw * 0.4, by - fh);
-      g1.addColorStop(0, 'rgba(255, 108, 8, 1)');
-      g1.addColorStop(0.5, 'rgba(255, 68, 5, 0.55)');
-      g1.addColorStop(1, 'rgba(175, 22, 0, 0)');
-      ctx.fillStyle = g1;
-      ctx.fill();
-      ctx.restore();
+    vec3 cOrange = vec3(1.0, 0.3, 0.04);
+    vec3 cYellow = vec3(1.0, 0.56, 0.12);
+    vec3 cWhite = vec3(1.0, 0.88, 0.66);
+    vec3 cBlue = vec3(0.1, 0.24, 1.0);
 
-      // Layer 2 — mid yellow flame (soft blur)
-      ctx.save();
-      ctx.filter = 'blur(2px)';
-      ctx.globalCompositeOperation = 'lighter';
-      ctx.globalAlpha = 0.82;
-      flamePath(cx, by, fh * 0.78, 15 * intensity, sw * 0.82);
-      const g2 = ctx.createLinearGradient(cx, by, cx + sw * 0.35, by - fh * 0.78);
-      g2.addColorStop(0, 'rgba(255, 248, 202, 1)');
-      g2.addColorStop(0.28, 'rgba(255, 196, 52, 0.95)');
-      g2.addColorStop(0.65, 'rgba(255, 118, 14, 0.55)');
-      g2.addColorStop(1, 'rgba(255, 76, 0, 0)');
-      ctx.fillStyle = g2;
-      ctx.fill();
-      ctx.restore();
+    vec3 col = mix(cOrange, cYellow, 1.0 - smoothstep(0.35, 0.85, e));
+    col = mix(col, cOrange * 0.9, smoothstep(0.45, 0.95, h));
+    col = mix(col, cWhite, core);
+    float bright = inside * lum * tipFade * (1.0 - 0.65 * darkCone) * (1.05 + 1.35 * core);
 
-      // Layer 3 — inner hot core: blue at wick base → white hot → fading yellow tip
-      ctx.save();
-      ctx.filter = 'blur(0.8px)';
-      ctx.globalCompositeOperation = 'lighter';
-      ctx.globalAlpha = 0.92;
-      flamePath(cx, by, fh * 0.52, 7.5, sw * 0.9);
-      const g3 = ctx.createLinearGradient(cx, by, cx + sw * 0.15, by - fh * 0.52);
-      g3.addColorStop(0, 'rgba(168, 208, 255, 1)');   // blue at wick (combustion zone)
-      g3.addColorStop(0.1, 'rgba(255, 255, 248, 1)'); // white hot
-      g3.addColorStop(0.48, 'rgba(255, 238, 112, 0.85)');
-      g3.addColorStop(1, 'rgba(255, 162, 22, 0)');
-      ctx.fillStyle = g3;
-      ctx.fill();
-      ctx.restore();
+    vec3 outc = col * bright + cBlue * blue * inside * 1.1;
 
-      // Sparks — ejected from upper flame, drift on wind
-      if (Math.random() > 0.9) {
-        sparks.push({
-          x: cx + (Math.random() - 0.5) * 12 + sw * 0.35,
-          y: by - fh * (0.45 + Math.random() * 0.35),
-          vx: (Math.random() - 0.5 + wind * 0.28) * 2.8,
-          vy: -(2.2 + Math.random() * 3.2),
-          life: 1,
-          size: 0.8 + Math.random() * 1.8,
-        });
-      }
+    // Faint, almost invisible outer mantle.
+    float mantle = (1.0 - smoothstep(0.85, 1.4, e)) * (1.0 - inside) * smoothstep(-0.05, 0.1, h) * (1.0 - smoothstep(0.6, 1.05, h));
+    outc += vec3(0.5, 0.17, 0.04) * mantle * 0.22;
 
-      ctx.save();
-      ctx.globalCompositeOperation = 'lighter';
-      for (let i = sparks.length - 1; i >= 0; i--) {
-        const sp = sparks[i];
-        sp.x += sp.vx; sp.y += sp.vy;
-        sp.vy += 0.07; sp.vx *= 0.97; // slight gravity, air drag
-        sp.life -= 0.026;
-        if (sp.life <= 0) { sparks.splice(i, 1); continue; }
-        const r = sp.size * sp.life * 2.2;
-        ctx.globalAlpha = sp.life * 0.88;
-        const sg = ctx.createRadialGradient(sp.x, sp.y, 0, sp.x, sp.y, r);
-        sg.addColorStop(0, `rgba(255, 255, 200, ${sp.life})`);
-        sg.addColorStop(1, 'rgba(255, 130, 0, 0)');
-        ctx.fillStyle = sg;
-        ctx.beginPath();
-        ctx.arc(sp.x, sp.y, r, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      ctx.restore();
+    gl_FragColor = vec4(outc * uLit, 1.0);
+  }
+`;
 
-      raf = requestAnimationFrame(render);
-    };
+const haloFragment = /* glsl */ `
+  uniform float uLit;
+  uniform float uSize;
+  varying vec2 vUv;
+  void main() {
+    vec2 d = (vUv - 0.5) * uSize;
+    d.y *= 0.72;
+    float r = length(d);
+    float g = 0.05 * exp(-r * 0.3) + 0.1 * exp(-r * r * 0.35);
+    g *= 1.0 - smoothstep(0.3, 0.5, length(vUv - 0.5));
+    gl_FragColor = vec4(vec3(1.0, 0.52, 0.2) * g * uLit, 1.0);
+  }
+`;
 
-    render();
-    return () => cancelAnimationFrame(raf);
-  }, [wind, intensity]);
+export function Flame() {
+  const flameRef = useRef<THREE.Mesh>(null!);
+  const haloRef = useRef<THREE.Mesh>(null!);
+
+  const flameMat = useMemo(
+    () =>
+      new THREE.ShaderMaterial({
+        vertexShader: vertex,
+        fragmentShader: flameFragment,
+        uniforms: {
+          uTime: { value: 0 },
+          uLen: { value: CANDLE.flameLength },
+          uLean: { value: 0 },
+          uTurb: { value: 0 },
+          uLit: { value: 1 },
+          uWidth: { value: 0.56 },
+          uPlane: { value: new THREE.Vector2(PLANE_W, PLANE_H) },
+          uBase: { value: BASE },
+        },
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide,
+      }),
+    [],
+  );
+
+  const haloMat = useMemo(
+    () =>
+      new THREE.ShaderMaterial({
+        vertexShader: vertex,
+        fragmentShader: haloFragment,
+        uniforms: { uLit: { value: 1 }, uSize: { value: 18 } },
+        transparent: true,
+        depthWrite: false,
+        depthTest: false,
+        blending: THREE.AdditiveBlending,
+      }),
+    [],
+  );
+
+  useFrame(({ camera, clock }) => {
+    const baseY = CANDLE.baseY + sim.height;
+    const f = flameRef.current;
+    // Billboard around the vertical axis only, so the flame always stands upright.
+    const angle = Math.atan2(camera.position.x - f.position.x, camera.position.z - f.position.z);
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    const sideLean = sim.leanX * cos - sim.leanZ * sin;
+    const towardLean = sim.leanX * sin + sim.leanZ * cos;
+
+    f.rotation.y = angle;
+    f.position.set(0, baseY - BASE + PLANE_H / 2 - 0.1, 0);
+
+    const u = flameMat.uniforms;
+    u.uTime.value = clock.elapsedTime;
+    u.uLen.value = Math.max(0.001, sim.flameLen * (1 - 0.18 * Math.min(1, Math.abs(towardLean))));
+    u.uLean.value = sideLean;
+    u.uTurb.value = sim.turb;
+    u.uLit.value = sim.litAmount > 0.001 ? 1 : 0;
+    f.visible = sim.litAmount > 0.001;
+
+    const h = haloRef.current;
+    h.position.set(sideLean * cos * 0.6, baseY + 0.25 + sim.flameLen * 0.42, -sideLean * sin * 0.6);
+    h.rotation.y = angle;
+    haloMat.uniforms.uLit.value = sim.litAmount * sim.flicker * (sim.flameLen / CANDLE.flameLength);
+    h.visible = sim.litAmount > 0.001;
+  });
 
   return (
-    <div className="pointer-events-none relative left-1/2 -top-32 h-44 w-36 -translate-x-1/2">
-      <canvas
-        ref={canvasRef}
-        className="h-full w-full blur-[0.8px] filter"
-        style={{ transform: 'translateY(18px)' }}
-      />
-      <div className="absolute left-1/2 top-[60%] h-16 w-12 -translate-x-1/2 -translate-y-1/2 rounded-full bg-orange-400 opacity-[0.1] blur-2xl mix-blend-screen" />
-    </div>
+    <>
+      <mesh ref={flameRef} material={flameMat} renderOrder={10}>
+        <planeGeometry args={[PLANE_W, PLANE_H]} />
+      </mesh>
+      <mesh ref={haloRef} material={haloMat} renderOrder={11}>
+        <planeGeometry args={[18, 18]} />
+      </mesh>
+    </>
   );
-};
+}
