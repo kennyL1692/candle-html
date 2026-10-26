@@ -2,19 +2,25 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Melting Candle</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#020203" />
+    <meta name="description" content="A real-time 3D candle: a living flame, molten wax, drips, smoke and warm light. Blow it out, relight it, and watch it burn down." />
+    <title>Pillar Candle</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&family=Instrument+Serif&display=swap"
+    />
     <style>
-      /* Custom smooth melting transition if needed, though we use JS for precise 10s timing */
+      /* Keeps the first paint dark before the app styles load. */
+      html,
       body {
         margin: 0;
-        background-color: #0f0f10; // Dark background for better candle visibility
-        color: white; /
-        overflow: hidden;
+        background: #020203;
       }
     </style>
-</head>
+  </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/index.tsx"></script>
